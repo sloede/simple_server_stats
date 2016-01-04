@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Set network interface to use for bandwidth data
+NETWORK_IF=eth0
+
+
+################################################################################
+# END OF CONFIGURATION SECTION
+################################################################################
+
+# Current timestep with millisecond resolution
+date=$(date "+%s.%3N")
+
+# Average CPU load over past minute
+load=$(cat /proc/loadavg | awk '{print $2}')
+
+# Total available memory
+mem_avail=$(free -b | grep ^Mem | awk '{print $2}')
+
+# Used memory
+mem_used=$(free -b | grep ^-/+ | awk '{print $3}')
+
+# Total available swap
+swap_avail=$(free -b | grep ^Swap | awk '{print $2}')
+
+# Used swap
+swap_used=$(free -b | grep ^Swap | awk '{print $3}')
+
+# Bytes received on $NETWORK_IF
+bytes_recv=$(cat /proc/net/dev | grep $NETWORK_IF | awk '{print $2'})
+
+# Bytes sent from $NETWORK_IF
+bytes_send=$(cat /proc/net/dev | grep $NETWORK_IF | awk '{print $10'})
+
+# Human-readable date for easier data file perusing
+date_hr=$(date -Rd @$date)
+
+printf "%14.3f %6.2f %12d %12d %12d %12d %14d %14d \"%31s\"\n" \
+  $date \
+  $load \
+  $mem_avail $mem_used $swap_avail $swap_used \
+  $bytes_recv $bytes_send \
+  "$date_hr"
