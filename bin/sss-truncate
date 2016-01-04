@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Set default number of lines to the number of minutes in 90 days
+LINES=129600
+
+
+################################################################################
+# END OF CONFIGURATION SECTION
+################################################################################
+
+# Auxiliary method to show usage information
+usage() {
+  cat << EOF
+usage: $(basename $0) [-h] [-l LINES] FILE [FILE...]
+
+  Truncate a file to LINES lines from the beginning (i.e. remove lines from
+  the beginning of the file until it contains no more than LINES lines). If the
+  file has less than LINES lines, do nothing.
+
+  PARAMETERS
+
+    -h          Show this help and exit.
+    -l LINES    Number of lines to truncate to (default = $DEFAULT_LINES).
+    FILE        Name of the file to truncate.
+EOF
+}
+
+# Parse option arguments
+while getopts ":hl:" arg; do
+  case $arg in
+    h)
+      # Show help and quit
+      usage
+      exit
+      ;;
+
+    l)
+      # Check if argument is integer (note that -ne will not work here)
+      if [ "$OPTARG" -eq "$OPTARG" ] 2>/dev/null; then
+        :
+      else
+        echo "error: the argument to -l ($OPTARG) is not an integer" >&2
+        usage
+        exit 2
+      fi
+
+      # Check if argument is non-negative
+      if [ "$OPTARG" -lt 0 ]; then
+        echo "error: the argument to -l must be greater than zero" >&2
+        usage
+        exit 2
+      fi
+
+      # Store argument
+      LINES=$OPTARG
+      ;;
+
+    :)
+      # Print error message and quit if a parameter with required argument
+      # misses its argument
+      echo "error: parameter $OPTARG requires an argument" >&2
+      usage
+      exit 2
+      ;;
+
+    \?)
+      # Print error message and quit if an unknown parameter was encountered
+      echo "error: parameter -$OPTARG does not exist" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+shift $((OPTIND-1))
+
+# Check if file parameter is present
+if [ $# -lt 1 ]; then
+  echo "error: missing file parameter" >&2
+  usage
+  exit 2
+fi
+
+# Iterate over filenames and truncate files
+for f in "$@"; do
+  # Check file existence
+  if [ ! -f "$f" ]; then
+    echo "error: file $f does not exist" >&2
+    exit 1
+  fi
+
+  # Check if file is readable
+  if [ ! -r "$f" ]; then
+    echo "error: file $f can not be read (missing file permissions)" >&2
+    exit 1
+  fi
+
+  # Check if file is writable
+  if [ ! -w "$f" ]; then
+    echo "error: file $f can not be modified (missing file permissions)" >&2
+    exit 1
+  fi
+
+  # Get current number of lines in file
+  current_lines=$(cat $f | wc -l)
+
+  # If file has too many lines, truncate it
+  if [ "$current_lines" -gt "$LINES" ]; then
+    to_remove=$(($current_lines - $LINES))
+    sed -i "1,${to_remove}d" $f
+  fi
+done
