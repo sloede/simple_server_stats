@@ -17,17 +17,17 @@ int main() {
     const auto date = std::chrono::duration_cast<std::chrono::microseconds>(
         now.time_since_epoch()).count();
 
-    // Read CPU load information
-    long long int user = 0;
-    long long int nice = 0;
-    long long int system = 0;
-    long long int idle = 0;
-    long long int iowait = 0;
-    long long int irq = 0;
-    long long int softirq = 0;
-    long long int steal = 0;
-    long long int guest = 0;
-    long long int guest_nice = 0;
+    // CPU statistics
+    long long int cpu_user = 0;
+    long long int cpu_nice = 0;
+    long long int cpu_system = 0;
+    long long int cpu_idle = 0;
+    long long int cpu_iowait = 0;
+    long long int cpu_irq = 0;
+    long long int cpu_softirq = 0;
+    long long int cpu_steal = 0;
+    long long int cpu_guest = 0;
+    long long int cpu_guest_nice = 0;
     {
       ifstream in("/proc/stat");
       string line;
@@ -35,21 +35,41 @@ int main() {
       istringstream l(line);
       string dump;
       l >> dump;
-      l >> user;
-      l >> nice;
-      l >> system;
-      l >> idle;
-      l >> iowait;
-      l >> irq;
-      l >> softirq;
-      l >> steal;
-      l >> guest;
-      l >> guest_nice;
+      l >> cpu_user;
+      l >> cpu_nice;
+      l >> cpu_system;
+      l >> cpu_idle;
+      l >> cpu_iowait;
+      l >> cpu_irq;
+      l >> cpu_softirq;
+      l >> cpu_steal;
+      l >> cpu_guest;
+      l >> cpu_guest_nice;
     }
 
+    // Memory usage
+    long long int memory_available;
+    long long int memory_used;
+    long long int swap_available;
+    long long int swap_used;
+    // {
+    //   ifstream in("/proc/net/dev");
+    //   for (string line; getline(in, line); ) {
+    //     istringstream l(line);
+    //     string interface;
+    //     l >> interface;
+    //     if (interface == NETWORK_IF + ":") {
+    //       l >> bytes_recv;
+    //       for (int i = 0; i < 8; i++) {
+    //         l >> bytes_send;
+    //       }
+    //     }
+    //   }
+    // }
+
     // Bytes received/sent on NETWORK_IF
-    long long int bytes_recv = 0;
-    long long int bytes_send = 0;
+    long long int network_received = 0;
+    long long int network_sent = 0;
     {
       ifstream in("/proc/net/dev");
       for (string line; getline(in, line); ) {
@@ -57,19 +77,27 @@ int main() {
         string interface;
         l >> interface;
         if (interface == NETWORK_IF + ":") {
-          l >> bytes_recv;
+          l >> network_received;
           for (int i = 0; i < 8; i++) {
-            l >> bytes_send;
+            l >> network_sent;
           }
         }
       }
     }
 
     cout << date
-         << " " << bytes_recv << " " << bytes_send
-         << " " << user << " " << nice << " " << system << " " << idle
-         << " " << iowait << " " << irq << " " << softirq
-         << " " << steal << " " << guest << " " << guest_nice
+         << " " << network_received
+         << " " << network_sent
+         << " " << cpu_user
+         << " " << cpu_nice
+         << " " << cpu_system
+         << " " << cpu_idle
+         << " " << cpu_iowait
+         << " " << cpu_irq
+         << " " << cpu_softirq
+         << " " << cpu_steal
+         << " " << cpu_guest
+         << " " << cpu_guest_nice
          << endl;
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
