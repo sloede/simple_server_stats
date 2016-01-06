@@ -13,7 +13,7 @@ const int DEFAULT_PERIOD = 1;
 using namespace std;
 
 namespace {
-  // Internal data structure for command line arguments
+  /// Internal data structure for command line arguments
   struct CommandLineArguments {
     string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
@@ -21,8 +21,8 @@ namespace {
 }
 
 
-// Print usage information
-void usage(std::ostream& os = std::cerr) {
+/// Print usage information
+void print_usage(std::ostream& os = std::cerr) {
   os << "usage: sss-mon [-f] [-h] [-i INTERFACE] [-p PERIOD]\n"
      << "\n"
      << "sss-mon gathers information on the current CPU load, memory usage, \n"
@@ -79,8 +79,9 @@ void usage(std::ostream& os = std::cerr) {
 }
 
 
-// Parse command line options
+/// Parse command line options
 CommandLineArguments parse_arguments(int argc, char* argv[]) {
+  // Loop over arguments
   CommandLineArguments args;
   while (true) {
     // Create structure with long options
@@ -93,36 +94,62 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
     };
 
     // Get next argument
-    const int c = getopt_long(argc, argv, "hl:i:p:", long_options, nullptr);
+    const int c = getopt_long(argc, argv, "fhl:i:p:", long_options, nullptr);
 
-    // Break if end of options is reached
+    // Exit loop if end of options is reached
     if (c == -1) {
       break;
     }
 
-    // Parse arguments
+    // Handle argument
     switch (c) {
+      // Print field names and quit
       case 'f':
         {
+          cout << "date"
+               << " steady"
+               << " cpu_user"
+               << " cpu_nice"
+               << " cpu_system"
+               << " cpu_idle"
+               << " cpu_iowait"
+               << " cpu_irq"
+               << " cpu_softirq"
+               << " cpu_steal"
+               << " cpu_guest"
+               << " cpu_guest_nice"
+               << " memory_total"
+               << " memory_used"
+               << " swap_total"
+               << " swap_used"
+               << " network_received"
+               << " network_sent"
+               << endl;
           exit(0);
         }
 
+      // Show usage information and quit
       case 'h':
         {
-          usage(cout);
+          print_usage(cout);
           exit(0);
         }
 
+      // Set network interface
       case 'i':
         {
           args.network_interface = optarg;
           break;
         }
 
+      // Set sampling period
       case 'p':
         {
+          // Try to parse argument as integer
           istringstream arg(optarg);
           arg >> args.period;
+
+          // Handle bad arguments
           if (arg.fail() || arg.get() != istringstream::traits_type::eof()) {
             cerr << "error: argument to '-p|--period' (" << optarg
                  << ") is not an integer" << endl;
@@ -135,13 +162,15 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
           break;
         }
 
+      // If an unknown/bad argument was encountered, show usage and quit
       case '?':
         {
-          usage();
+          print_usage();
           exit(2);
           break;
         }
 
+      // The default should never be reached and signifies an unknown problem
       default:
         {
           cerr << "error: unknown error while parsing command line arguments"
@@ -180,12 +209,19 @@ int main(int argc, char* argv[]) {
     unsigned long long int cpu_guest = 0;
     unsigned long long int cpu_guest_nice = 0;
     {
+      // Open file
       ifstream in("/proc/stat");
       string line;
+
+      // Read first line with cumulated values
       getline(in, line);
       istringstream l(line);
+
+      // Read first word and throw it away (will probably be 'cpu')
       string dump;
       l >> dump;
+
+      // Read and convert CPU statistics
       l >> cpu_user;
       l >> cpu_nice;
       l >> cpu_system;
@@ -204,15 +240,21 @@ int main(int argc, char* argv[]) {
     unsigned long long int swap_total = 0;
     unsigned long long int swap_used = 0;
     {
+      // Open file
       ifstream in("/proc/meminfo");
+
+      // Read file line by line and parse each line for relevant data
       unsigned long long int memory_free = 0;
       unsigned long long int buffers = 0;
       unsigned long long int cached = 0;
       unsigned long long int swap_free = 0;
       for (string line; getline(in, line); ) {
+        // Extract data type
         istringstream l(line);
         string type;
         l >> type;
+
+        // Store data depending on type
         if (type == "MemTotal:") {
           l >> memory_total;
         } else if (type == "MemFree:") {
@@ -228,9 +270,11 @@ int main(int argc, char* argv[]) {
         }
       }
 
+      // Calculate used memory and used swap space
       memory_used = memory_total - memory_free - buffers - cached;
       swap_used = swap_total - swap_free;
 
+      // Convert values from kibibytes to bytes
       memory_total *= 1024;
       memory_used *= 1024;
       swap_total *= 1024;
@@ -241,13 +285,22 @@ int main(int argc, char* argv[]) {
     unsigned long long int network_received = 0;
     unsigned long long int network_sent = 0;
     {
+      // Open file
       ifstream in("/proc/net/dev");
+
+      // Read file line by line until selected interface is found
       for (string line; getline(in, line); ) {
+        // Extract interface name
         istringstream l(line);
         string interface;
         l >> interface;
+
+        // If specified interface is found, read data and exit loop
         if (interface == args.network_interface + ":") {
+          // Bytes received is the 2nd value
           l >> network_received;
+
+          // Bytes sent is the 10th value
           for (int i = 0; i < 8; i++) {
             l >> network_sent;
           }
@@ -256,7 +309,7 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    // Print to stdout
+    // Print all data to stdout
     cout << date
          << " " << steady
          << " " << cpu_user
