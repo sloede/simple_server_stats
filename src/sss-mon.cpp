@@ -29,16 +29,19 @@ namespace {
     long long int steady = 0;
 
     // All other values are defined as unsigned
-    unsigned long long int cpu_user = 0;
-    unsigned long long int cpu_nice = 0;
-    unsigned long long int cpu_system = 0;
-    unsigned long long int cpu_idle = 0;
-    unsigned long long int cpu_iowait = 0;
-    unsigned long long int cpu_irq = 0;
-    unsigned long long int cpu_softirq = 0;
-    unsigned long long int cpu_steal = 0;
-    unsigned long long int cpu_guest = 0;
-    unsigned long long int cpu_guest_nice = 0;
+    double cpu_load_1m = 0.0;
+    double cpu_load_5m = 0.0;
+    double cpu_load_15m = 0.0;
+    unsigned long long int cpu_time_user = 0;
+    unsigned long long int cpu_time_nice = 0;
+    unsigned long long int cpu_time_system = 0;
+    unsigned long long int cpu_time_idle = 0;
+    unsigned long long int cpu_time_iowait = 0;
+    unsigned long long int cpu_time_irq = 0;
+    unsigned long long int cpu_time_softirq = 0;
+    unsigned long long int cpu_time_steal = 0;
+    unsigned long long int cpu_time_guest = 0;
+    unsigned long long int cpu_time_guest_nice = 0;
     unsigned long long int memory_total = 0;
     unsigned long long int memory_used = 0;
     unsigned long long int swap_total = 0;
@@ -86,21 +89,24 @@ void print_usage(std::ostream& os = std::cerr) {
      << "  steady                A steady timestamp (not necessarily since\n"
      << "                        Unix epoch) for robust time-average \n"
      << "                        calculations in microseconds.\n"
-     << "  cpu_user              CPU time spent in user mode.\n"
-     << "  cpu_nice              CPU time spent in user mode with low \n"
+     << "  cpu_load_1m           CPU load average (1 minute average).\n"
+     << "  cpu_load_5m           CPU load average (5 minute average).\n"
+     << "  cpu_load_15m          CPU load average (15 minute average).\n"
+     << "  cpu_time_user         CPU time spent in user mode.\n"
+     << "  cpu_time_nice         CPU time spent in user mode with low \n"
      << "                        priority (nice).\n"
-     << "  cpu_system            CPU time spent in system mode.\n"
-     << "  cpu_idle              CPU time spent in the idle task.\n"
-     << "  cpu_iowait            CPU time waiting for I/O to complete.\n"
-     << "  cpu_irq               CPU time servicing interrupts.\n"
-     << "  cpu_softirq           CPU time ervicing softirqs.\n"
-     << "  cpu_steal             CPU stolen time, which is the time spent in\n"
+     << "  cpu_time_system       CPU time spent in system mode.\n"
+     << "  cpu_time_idle         CPU time spent in the idle task.\n"
+     << "  cpu_time_iowait       CPU time waiting for I/O to complete.\n"
+     << "  cpu_time_irq          CPU time servicing interrupts.\n"
+     << "  cpu_time_softirq      CPU time ervicing softirqs.\n"
+     << "  cpu_time_steal        CPU stolen time, which is the time spent in\n"
      << "                        other operating systems when running in a \n"
      << "                        virtualized environment.\n"
-     << "  cpu_guest             CPU time spent running a virtual CPU for \n"
+     << "  cpu_time_guest        CPU time spent running a virtual CPU for \n"
      << "                        guest operating systems under the control of\n"
      << "                        the Linux kernel.\n"
-     << "  cpu_guest_nice        CPU time spent running a niced guest \n"
+     << "  cpu_time_guest_nice   CPU time spent running a niced guest \n"
      << "                        (virtual CPU for guest operating systems\n"
      << "                        under the control of the Linux kernel).\n"
      << "  memory_total          Total usable RAM (in bytes).\n"
@@ -111,8 +117,9 @@ void print_usage(std::ostream& os = std::cerr) {
      << "  network_sent          Total bytes sent (in bytes).\n"
      << "\n"
      << "The recorded information is gathered from the 'proc' filesystem (see\n"
-     << "also 'man proc'). CPU data is from '/proc/stat', memory data is from\n"
-     << "'/proc/meminfo', and network data is from '/proc/net/dev'.\n";
+     << "also 'man proc'). CPU data is from '/proc/loadavg' and '/proc/stat',\n"
+     << "memory data is from '/proc/meminfo', and network data is from\n"
+     << "'/proc/net/dev'.\n";
   os.flush();
 }
 
@@ -148,16 +155,19 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
         {
           std::cout << "date"
                     << " steady"
-                    << " cpu_user"
-                    << " cpu_nice"
-                    << " cpu_system"
-                    << " cpu_idle"
-                    << " cpu_iowait"
-                    << " cpu_irq"
-                    << " cpu_softirq"
-                    << " cpu_steal"
-                    << " cpu_guest"
-                    << " cpu_guest_nice"
+                    << " cpu_load_1m"
+                    << " cpu_load_5m"
+                    << " cpu_load_15m"
+                    << " cpu_time_user"
+                    << " cpu_time_nice"
+                    << " cpu_time_system"
+                    << " cpu_time_idle"
+                    << " cpu_time_iowait"
+                    << " cpu_time_irq"
+                    << " cpu_time_softirq"
+                    << " cpu_time_steal"
+                    << " cpu_time_guest"
+                    << " cpu_time_guest_nice"
                     << " memory_total"
                     << " memory_used"
                     << " swap_total"
@@ -264,13 +274,29 @@ Sample sample(const std::string& network_interface) {
   s.steady = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
 
+  // CPU load averages
+  {
+    // Open file
+    std::ifstream in("/proc/loadavg");
+
+    // Read line
+    std::string line;
+    std::getline(in, line);
+    std::istringstream l(line);
+
+    // Read and convert CPU load averages
+    l >> s.cpu_load_1m;
+    l >> s.cpu_load_5m;
+    l >> s.cpu_load_15m;
+  }
+
   // CPU statistics
   {
     // Open file
     std::ifstream in("/proc/stat");
-    std::string line;
 
     // Read first line with cumulated values
+    std::string line;
     std::getline(in, line);
     std::istringstream l(line);
 
@@ -279,16 +305,16 @@ Sample sample(const std::string& network_interface) {
     l >> dump;
 
     // Read and convert CPU statistics
-    l >> s.cpu_user;
-    l >> s.cpu_nice;
-    l >> s.cpu_system;
-    l >> s.cpu_idle;
-    l >> s.cpu_iowait;
-    l >> s.cpu_irq;
-    l >> s.cpu_softirq;
-    l >> s.cpu_steal;
-    l >> s.cpu_guest;
-    l >> s.cpu_guest_nice;
+    l >> s.cpu_time_user;
+    l >> s.cpu_time_nice;
+    l >> s.cpu_time_system;
+    l >> s.cpu_time_idle;
+    l >> s.cpu_time_iowait;
+    l >> s.cpu_time_irq;
+    l >> s.cpu_time_softirq;
+    l >> s.cpu_time_steal;
+    l >> s.cpu_time_guest;
+    l >> s.cpu_time_guest_nice;
   }
 
   // Memory usage
@@ -391,16 +417,19 @@ int main(int argc, char* argv[]) {
     // Print all data to stdout
     os << s.date
        << " " << s.steady
-       << " " << s.cpu_user
-       << " " << s.cpu_nice
-       << " " << s.cpu_system
-       << " " << s.cpu_idle
-       << " " << s.cpu_iowait
-       << " " << s.cpu_irq
-       << " " << s.cpu_softirq
-       << " " << s.cpu_steal
-       << " " << s.cpu_guest
-       << " " << s.cpu_guest_nice
+       << " " << s.cpu_load_1m
+       << " " << s.cpu_load_5m
+       << " " << s.cpu_load_15m
+       << " " << s.cpu_time_user
+       << " " << s.cpu_time_nice
+       << " " << s.cpu_time_system
+       << " " << s.cpu_time_idle
+       << " " << s.cpu_time_iowait
+       << " " << s.cpu_time_irq
+       << " " << s.cpu_time_softirq
+       << " " << s.cpu_time_steal
+       << " " << s.cpu_time_guest
+       << " " << s.cpu_time_guest_nice
        << " " << s.memory_total
        << " " << s.memory_used
        << " " << s.swap_total
