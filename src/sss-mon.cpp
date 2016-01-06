@@ -7,12 +7,14 @@
 #include <sstream>
 #include <getopt.h>
 
+// Set sensible default values for network interface and sampling period
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
 const int DEFAULT_PERIOD = 1;
 
 namespace {
   /// Internal data structure for command line arguments
   struct CommandLineArguments {
+    unsigned long long int iterations = 0;
     std::string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
   };
@@ -50,12 +52,17 @@ void print_usage(std::ostream& os = std::cerr) {
      << "\n"
      << "sss-mon gathers information on the current CPU load, memory usage, \n"
      << "and network traffic and prints it to stdout. Once started, it runs \n"
-     << "continuously until killed.\n"
+     << "continuously until killed, unless a maximum number of iterations is\n"
+     << "specified on the command line.\n"
      << "\n"
      << "optional arguments:\n"
      << "  -f, --field-names     Print space-separated list of field names\n"
      << "                        and exit.\n"
      << "  -h, --help            Show this help message and exit.\n"
+     << "  -n, --iterations ITERATIONS\n"
+     << "                        Number of samples to gather. Must be a \n"
+     << "                        non-negative integer value. If zero, sss-mon \n"
+     << "                        continues indefinitely until killed.\n"
      << "  -i, --network-interface INTERFACE\n"
      << "                        Gather traffic statistics for the given\n"
      << "                        network interface. INTERFACE must be a valid\n"
@@ -111,13 +118,14 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
     static struct option long_options[] = {
       {"field-names", no_argument, nullptr, 'f'},
       {"help", no_argument, nullptr, 'h'},
+      {"iterations", required_argument, nullptr, 'n'},
       {"network-interface", required_argument, nullptr, 'i'},
       {"period", required_argument, nullptr, 'p'},
       {nullptr, 0, nullptr, 0}
     };
 
     // Get next argument
-    const int c = getopt_long(argc, argv, "fhl:i:p:", long_options, nullptr);
+    const int c = getopt_long(argc, argv, "fhn:l:i:p:", long_options, nullptr);
 
     // Exit loop if end of options is reached
     if (c == -1) {
@@ -156,6 +164,23 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
         {
           print_usage(std::cout);
           exit(0);
+        }
+
+      // Set number of iterations
+      case 'n':
+        {
+          // Try to parse argument as integer
+          std::istringstream arg(optarg);
+          arg >> args.iterations;
+
+          // Handle bad arguments
+          if (arg.fail()
+              || arg.get() != std::istringstream::traits_type::eof()) {
+            std::cerr << "error: argument to '-n|--iterations' (" << optarg
+                      << ") is not an integer" << std::endl;
+            exit(2);
+          }
+          break;
         }
 
       // Set network interface
@@ -326,7 +351,7 @@ int main(int argc, char* argv[]) {
   const auto args = parse_arguments(argc, argv);
 
   // Begin main loop
-  while (true) {
+  for (unsigned long long int iteration = 0;;) {
     // Obtain sample
     const Sample s = sample(args.network_interface);
 
@@ -350,6 +375,14 @@ int main(int argc, char* argv[]) {
               << " " << s.network_received
               << " " << s.network_sent
               << std::endl;
+
+    // Increment interation counter
+    iteration++;
+
+    // Exit main loop if maximum number of iterations is reached
+    if (args.iterations > 0 && iteration >= args.iterations) {
+      break;
+    }
 
     // Sleep until next sample time
     std::this_thread::sleep_for(std::chrono::seconds(args.period));
