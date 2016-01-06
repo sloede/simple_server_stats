@@ -10,13 +10,36 @@
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
 const int DEFAULT_PERIOD = 1;
 
-using namespace std;
-
 namespace {
   /// Internal data structure for command line arguments
   struct CommandLineArguments {
-    string network_interface = DEFAULT_NETWORK_INTERFACE;
+    std::string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
+  };
+
+  /// Internal data structure for statistical data sample
+  struct Sample {
+    // Timestamp values may be signed
+    long long int date = 0;
+    long long int steady = 0;
+
+    // All other values are defined as unsigned
+    unsigned long long int cpu_user = 0;
+    unsigned long long int cpu_nice = 0;
+    unsigned long long int cpu_system = 0;
+    unsigned long long int cpu_idle = 0;
+    unsigned long long int cpu_iowait = 0;
+    unsigned long long int cpu_irq = 0;
+    unsigned long long int cpu_softirq = 0;
+    unsigned long long int cpu_steal = 0;
+    unsigned long long int cpu_guest = 0;
+    unsigned long long int cpu_guest_nice = 0;
+    unsigned long long int memory_total = 0;
+    unsigned long long int memory_used = 0;
+    unsigned long long int swap_total = 0;
+    unsigned long long int swap_used = 0;
+    unsigned long long int network_received = 0;
+    unsigned long long int network_sent = 0;
   };
 }
 
@@ -106,32 +129,32 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
       // Print field names and quit
       case 'f':
         {
-          cout << "date"
-               << " steady"
-               << " cpu_user"
-               << " cpu_nice"
-               << " cpu_system"
-               << " cpu_idle"
-               << " cpu_iowait"
-               << " cpu_irq"
-               << " cpu_softirq"
-               << " cpu_steal"
-               << " cpu_guest"
-               << " cpu_guest_nice"
-               << " memory_total"
-               << " memory_used"
-               << " swap_total"
-               << " swap_used"
-               << " network_received"
-               << " network_sent"
-               << endl;
+          std::cout << "date"
+                    << " steady"
+                    << " cpu_user"
+                    << " cpu_nice"
+                    << " cpu_system"
+                    << " cpu_idle"
+                    << " cpu_iowait"
+                    << " cpu_irq"
+                    << " cpu_softirq"
+                    << " cpu_steal"
+                    << " cpu_guest"
+                    << " cpu_guest_nice"
+                    << " memory_total"
+                    << " memory_used"
+                    << " swap_total"
+                    << " swap_used"
+                    << " network_received"
+                    << " network_sent"
+                    << std::endl;
           exit(0);
         }
 
       // Show usage information and quit
       case 'h':
         {
-          print_usage(cout);
+          print_usage(std::cout);
           exit(0);
         }
 
@@ -146,17 +169,18 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
       case 'p':
         {
           // Try to parse argument as integer
-          istringstream arg(optarg);
+          std::istringstream arg(optarg);
           arg >> args.period;
 
           // Handle bad arguments
-          if (arg.fail() || arg.get() != istringstream::traits_type::eof()) {
-            cerr << "error: argument to '-p|--period' (" << optarg
-                 << ") is not an integer" << endl;
+          if (arg.fail()
+              || arg.get() != std::istringstream::traits_type::eof()) {
+            std::cerr << "error: argument to '-p|--period' (" << optarg
+                      << ") is not an integer" << std::endl;
             exit(2);
           } else if (args.period < 1) {
-            cerr << "error: argument to '-p|--period' (" << optarg
-                 << ") is less than one" << endl;
+            std::cerr << "error: argument to '-p|--period' (" << optarg
+                      << ") is less than one" << std::endl;
             exit(2);
           }
           break;
@@ -173,8 +197,8 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
       // The default should never be reached and signifies an unknown problem
       default:
         {
-          cerr << "error: unknown error while parsing command line arguments"
-               << endl;
+          std::cerr << "error: unknown error while parsing command line "
+                    << "arguments" << std::endl;
           exit(1);
         }
     }
@@ -184,151 +208,148 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
 }
 
 
+/// Gather data sample
+Sample sample(const std::string& network_interface) {
+  // Create sample object
+  Sample s{};
+
+  // Current point in time as reference
+  s.date = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+
+  // Steady clock timestamp for robust time-average calculation
+  s.steady = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+
+  // CPU statistics
+  {
+    // Open file
+    std::ifstream in("/proc/stat");
+    std::string line;
+
+    // Read first line with cumulated values
+    std::getline(in, line);
+    std::istringstream l(line);
+
+    // Read first word and throw it away (will probably be 'cpu')
+    std::string dump;
+    l >> dump;
+
+    // Read and convert CPU statistics
+    l >> s.cpu_user;
+    l >> s.cpu_nice;
+    l >> s.cpu_system;
+    l >> s.cpu_idle;
+    l >> s.cpu_iowait;
+    l >> s.cpu_irq;
+    l >> s.cpu_softirq;
+    l >> s.cpu_steal;
+    l >> s.cpu_guest;
+    l >> s.cpu_guest_nice;
+  }
+
+  // Memory usage
+  {
+    // Open file
+    std::ifstream in("/proc/meminfo");
+
+    // Read file line by line and parse each line for relevant data
+    unsigned long long int memory_free = 0;
+    unsigned long long int buffers = 0;
+    unsigned long long int cached = 0;
+    unsigned long long int swap_free = 0;
+    for (std::string line; std::getline(in, line); ) {
+      // Extract data type
+      std::istringstream l(line);
+      std::string type;
+      l >> type;
+
+      // Store data depending on type
+      if (type == "MemTotal:") {
+        l >> s.memory_total;
+      } else if (type == "MemFree:") {
+        l >> memory_free;
+      } else if (type == "Buffers:") {
+        l >> buffers;
+      } else if (type == "Cached:") {
+        l >> cached;
+      } else if (type == "SwapTotal:") {
+        l >> s.swap_total;
+      } else if (type == "SwapFree:") {
+        l >> swap_free;
+      }
+    }
+
+    // Calculate used memory and used swap space
+    s.memory_used = s.memory_total - memory_free - buffers - cached;
+    s.swap_used = s.swap_total - swap_free;
+
+    // Convert values from kibibytes to bytes
+    s.memory_total *= 1024;
+    s.memory_used *= 1024;
+    s.swap_total *= 1024;
+    s.swap_used *= 1024;
+  }
+
+  // Bytes received/sent on network interface
+  {
+    // Open file
+    std::ifstream in("/proc/net/dev");
+
+    // Read file line by line until selected interface is found
+    for (std::string line; std::getline(in, line); ) {
+      // Extract interface name
+      std::istringstream l(line);
+      std::string interface;
+      l >> interface;
+
+      // If specified interface is found, read data and exit loop
+      if (interface == network_interface + ":") {
+        // Bytes received is the 2nd value
+        l >> s.network_received;
+
+        // Bytes sent is the 10th value
+        for (int i = 0; i < 8; i++) {
+          l >> s.network_sent;
+        }
+        break;
+      }
+    }
+  }
+
+  return s;
+}
+
+
 int main(int argc, char* argv[]) {
   // Parse command line arguments
   const auto args = parse_arguments(argc, argv);
 
+  // Begin main loop
   while (true) {
-    // Current point in time as reference
-    const auto date = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-
-    // Steady clock timestamp for robust time-average calculation
-    const auto steady = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-
-    // CPU statistics
-    unsigned long long int cpu_user = 0;
-    unsigned long long int cpu_nice = 0;
-    unsigned long long int cpu_system = 0;
-    unsigned long long int cpu_idle = 0;
-    unsigned long long int cpu_iowait = 0;
-    unsigned long long int cpu_irq = 0;
-    unsigned long long int cpu_softirq = 0;
-    unsigned long long int cpu_steal = 0;
-    unsigned long long int cpu_guest = 0;
-    unsigned long long int cpu_guest_nice = 0;
-    {
-      // Open file
-      ifstream in("/proc/stat");
-      string line;
-
-      // Read first line with cumulated values
-      getline(in, line);
-      istringstream l(line);
-
-      // Read first word and throw it away (will probably be 'cpu')
-      string dump;
-      l >> dump;
-
-      // Read and convert CPU statistics
-      l >> cpu_user;
-      l >> cpu_nice;
-      l >> cpu_system;
-      l >> cpu_idle;
-      l >> cpu_iowait;
-      l >> cpu_irq;
-      l >> cpu_softirq;
-      l >> cpu_steal;
-      l >> cpu_guest;
-      l >> cpu_guest_nice;
-    }
-
-    // Memory usage
-    unsigned long long int memory_total = 0;
-    unsigned long long int memory_used = 0;
-    unsigned long long int swap_total = 0;
-    unsigned long long int swap_used = 0;
-    {
-      // Open file
-      ifstream in("/proc/meminfo");
-
-      // Read file line by line and parse each line for relevant data
-      unsigned long long int memory_free = 0;
-      unsigned long long int buffers = 0;
-      unsigned long long int cached = 0;
-      unsigned long long int swap_free = 0;
-      for (string line; getline(in, line); ) {
-        // Extract data type
-        istringstream l(line);
-        string type;
-        l >> type;
-
-        // Store data depending on type
-        if (type == "MemTotal:") {
-          l >> memory_total;
-        } else if (type == "MemFree:") {
-          l >> memory_free;
-        } else if (type == "Buffers:") {
-          l >> buffers;
-        } else if (type == "Cached:") {
-          l >> cached;
-        } else if (type == "SwapTotal:") {
-          l >> swap_total;
-        } else if (type == "SwapFree:") {
-          l >> swap_free;
-        }
-      }
-
-      // Calculate used memory and used swap space
-      memory_used = memory_total - memory_free - buffers - cached;
-      swap_used = swap_total - swap_free;
-
-      // Convert values from kibibytes to bytes
-      memory_total *= 1024;
-      memory_used *= 1024;
-      swap_total *= 1024;
-      swap_used *= 1024;
-    }
-
-    // Bytes received/sent on network interface
-    unsigned long long int network_received = 0;
-    unsigned long long int network_sent = 0;
-    {
-      // Open file
-      ifstream in("/proc/net/dev");
-
-      // Read file line by line until selected interface is found
-      for (string line; getline(in, line); ) {
-        // Extract interface name
-        istringstream l(line);
-        string interface;
-        l >> interface;
-
-        // If specified interface is found, read data and exit loop
-        if (interface == args.network_interface + ":") {
-          // Bytes received is the 2nd value
-          l >> network_received;
-
-          // Bytes sent is the 10th value
-          for (int i = 0; i < 8; i++) {
-            l >> network_sent;
-          }
-          break;
-        }
-      }
-    }
+    // Obtain sample
+    const Sample s = sample(args.network_interface);
 
     // Print all data to stdout
-    cout << date
-         << " " << steady
-         << " " << cpu_user
-         << " " << cpu_nice
-         << " " << cpu_system
-         << " " << cpu_idle
-         << " " << cpu_iowait
-         << " " << cpu_irq
-         << " " << cpu_softirq
-         << " " << cpu_steal
-         << " " << cpu_guest
-         << " " << cpu_guest_nice
-         << " " << memory_total
-         << " " << memory_used
-         << " " << swap_total
-         << " " << swap_used
-         << " " << network_received
-         << " " << network_sent
-         << endl;
+    std::cout << s.date
+              << " " << s.steady
+              << " " << s.cpu_user
+              << " " << s.cpu_nice
+              << " " << s.cpu_system
+              << " " << s.cpu_idle
+              << " " << s.cpu_iowait
+              << " " << s.cpu_irq
+              << " " << s.cpu_softirq
+              << " " << s.cpu_steal
+              << " " << s.cpu_guest
+              << " " << s.cpu_guest_nice
+              << " " << s.memory_total
+              << " " << s.memory_used
+              << " " << s.swap_total
+              << " " << s.swap_used
+              << " " << s.network_received
+              << " " << s.network_sent
+              << std::endl;
 
     // Sleep until next sample time
     std::this_thread::sleep_for(std::chrono::seconds(args.period));
