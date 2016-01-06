@@ -410,6 +410,7 @@ int main(int argc, char* argv[]) {
   std::ostream os(args.log_file == "" ? std::cout.rdbuf() : log_file.rdbuf());
 
   // Begin main loop
+  const auto sleep_time = std::chrono::microseconds(1000000 * args.period);
   for (unsigned long long int iteration = 0;;) {
     // Obtain sample
     const Sample s = sample(args.network_interface);
@@ -447,6 +448,6 @@ int main(int argc, char* argv[]) {
     }
 
     // Sleep until next sample time
-    std::this_thread::sleep_for(std::chrono::seconds(args.period));
+    std::this_thread::sleep_for(sleep_time);
   }
 }
