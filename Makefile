@@ -1,7 +1,12 @@
-BIN_DIR := bin
-SRC_DIR := src
+all: bin/sss-mon
 
-all: $(BIN_DIR)/sss-mon
+bin/sss-mon: src/sss-mon.cpp
+	$(CXX) -std=c++11 -Wall -Wextra -pedantic -O3 -DNDEBUG -o $@ $<
 
-$(BIN_DIR)/sss-mon: $(SRC_DIR)/sss-mon.cpp
-	$(CXX) -std=c++11 -Wall -Wextra -pedantic -O2 -o $@ $<
+debug: src/sss-mon.cpp
+	$(CXX) -std=c++11 -Wall -Wextra -pedantic -O0 -g3 -o bin/sss-mon $<
+
+clean:
+	rm -f bin/sss-mon
+
+.PHONY: clean debug
