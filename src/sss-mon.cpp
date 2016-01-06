@@ -8,13 +8,16 @@
 #include <getopt.h>
 
 // Set sensible default values for network interface and sampling period
+const int DEFAULT_ITERATIONS = 0;
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
+const std::string DEFAULT_LOG_FILE = "";
 const int DEFAULT_PERIOD = 1;
 
 namespace {
   /// Internal data structure for command line arguments
   struct CommandLineArguments {
-    unsigned long long int iterations = 0;
+    unsigned long long int iterations = DEFAULT_ITERATIONS;
+    std::string log_file = DEFAULT_LOG_FILE;
     std::string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
   };
@@ -48,21 +51,25 @@ namespace {
 
 /// Print usage information
 void print_usage(std::ostream& os = std::cerr) {
-  os << "usage: sss-mon [-f] [-h] [-i INTERFACE] [-p PERIOD]\n"
+  os << "usage: sss-mon [-f] [-h] [-i INTERFACE] [-p PERIOD] [LOGFILE]\n"
      << "\n"
      << "sss-mon gathers information on the current CPU load, memory usage, \n"
-     << "and network traffic and prints it to stdout. Once started, it runs \n"
-     << "continuously until killed, unless a maximum number of iterations is\n"
-     << "specified on the command line.\n"
+     << "and network traffic and writes it to stdout or a log file. Once \n"
+     << "started, it runs continuously until killed, unless a maximum number\n"
+     << "of iterations is specified on the command line.\n"
+     << "\n"
+     << "positional arguments:\n"
+     << "  LOGFILE               Write data to LOGFILE instead of stdout.\n"
      << "\n"
      << "optional arguments:\n"
      << "  -f, --field-names     Print space-separated list of field names\n"
-     << "                        and exit.\n"
+     << "                        to stdout and exit.\n"
      << "  -h, --help            Show this help message and exit.\n"
      << "  -n, --iterations ITERATIONS\n"
      << "                        Number of samples to gather. Must be a \n"
-     << "                        non-negative integer value. If zero, sss-mon \n"
-     << "                        continues indefinitely until killed.\n"
+     << "                        non-negative integer value. If set to zero, \n"
+     << "                        sss-mon continues indefinitely until killed \n"
+     << "                        (default: " << DEFAULT_ITERATIONS << ").\n"
      << "  -i, --network-interface INTERFACE\n"
      << "                        Gather traffic statistics for the given\n"
      << "                        network interface. INTERFACE must be a valid\n"
@@ -72,8 +79,9 @@ void print_usage(std::ostream& os = std::cerr) {
      << "                        positive integer value (default: "
      << DEFAULT_PERIOD << ").\n"
      << "\n"
-     << "For each sample, a space-seperated list of the following fields is\n"
-     << "printed to stdout and terminated by a newline character (\\n):\n"
+     << "For each sample, a space-separated list of the following fields is\n"
+     << "written to stdout or a log file and terminated by a newline \n"
+     << "character (\\n):\n"
      << "  date                  Unix timestamp in milliseconds.\n"
      << "  steady                A steady timestamp (not necessarily since\n"
      << "                        Unix epoch) for robust time-average \n"
@@ -111,8 +119,9 @@ void print_usage(std::ostream& os = std::cerr) {
 
 /// Parse command line options
 CommandLineArguments parse_arguments(int argc, char* argv[]) {
-  // Loop over arguments
   CommandLineArguments args;
+
+  // Parse option arguments
   while (true) {
     // Create structure with long options
     static struct option long_options[] = {
@@ -226,6 +235,15 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
                     << "arguments" << std::endl;
           exit(1);
         }
+    }
+  }
+
+  // Parse for optional log file
+  if (optind < argc) {
+    args.log_file = argv[optind];
+    if (args.log_file == "") {
+      std::cerr << "error: log file name is empty" << std::endl;
+      exit(2);
     }
   }
 
@@ -350,31 +368,46 @@ int main(int argc, char* argv[]) {
   // Parse command line arguments
   const auto args = parse_arguments(argc, argv);
 
+  // Open log file if specified
+  std::ofstream log_file;
+  if (args.log_file != "") {
+    log_file.open(args.log_file, std::ios::out | std::ios::app);
+    if (!log_file.good()) {
+      std::cerr << "error: could not open log file '" << args.log_file
+                << "' for writing" << std::endl;
+      std::exit(1);
+    }
+    std::cout << "Writing data to '" << args.log_file << "'..." << std::endl;
+  }
+
+  // Set output stream to use
+  std::ostream os(args.log_file == "" ? std::cout.rdbuf() : log_file.rdbuf());
+
   // Begin main loop
   for (unsigned long long int iteration = 0;;) {
     // Obtain sample
     const Sample s = sample(args.network_interface);
 
     // Print all data to stdout
-    std::cout << s.date
-              << " " << s.steady
-              << " " << s.cpu_user
-              << " " << s.cpu_nice
-              << " " << s.cpu_system
-              << " " << s.cpu_idle
-              << " " << s.cpu_iowait
-              << " " << s.cpu_irq
-              << " " << s.cpu_softirq
-              << " " << s.cpu_steal
-              << " " << s.cpu_guest
-              << " " << s.cpu_guest_nice
-              << " " << s.memory_total
-              << " " << s.memory_used
-              << " " << s.swap_total
-              << " " << s.swap_used
-              << " " << s.network_received
-              << " " << s.network_sent
-              << std::endl;
+    os << s.date
+       << " " << s.steady
+       << " " << s.cpu_user
+       << " " << s.cpu_nice
+       << " " << s.cpu_system
+       << " " << s.cpu_idle
+       << " " << s.cpu_iowait
+       << " " << s.cpu_irq
+       << " " << s.cpu_softirq
+       << " " << s.cpu_steal
+       << " " << s.cpu_guest
+       << " " << s.cpu_guest_nice
+       << " " << s.memory_total
+       << " " << s.memory_used
+       << " " << s.swap_total
+       << " " << s.swap_used
+       << " " << s.network_received
+       << " " << s.network_sent
+       << std::endl;
 
     // Increment interation counter
     iteration++;
