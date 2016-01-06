@@ -13,12 +13,15 @@ const int DEFAULT_PERIOD = 1;
 using namespace std;
 
 namespace {
+  // Internal data structure for command line arguments
   struct CommandLineArguments {
     string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
   };
 }
 
+
+// Print usage information
 void usage(std::ostream& os = std::cerr) {
   os << "usage: sss-mon [-f] [-h] [-i INTERFACE] [-p PERIOD]\n"
      << "\n"
@@ -75,8 +78,9 @@ void usage(std::ostream& os = std::cerr) {
   os.flush();
 }
 
-int main(int argc, char* argv[]) {
-  // Parse command line options
+
+// Parse command line options
+CommandLineArguments parse_arguments(int argc, char* argv[]) {
   CommandLineArguments args;
   while (true) {
     // Create structure with long options
@@ -146,6 +150,14 @@ int main(int argc, char* argv[]) {
         }
     }
   }
+
+  return args;
+}
+
+
+int main(int argc, char* argv[]) {
+  // Parse command line arguments
+  const auto args = parse_arguments(argc, argv);
 
   while (true) {
     // Current point in time as reference
@@ -234,7 +246,7 @@ int main(int argc, char* argv[]) {
         istringstream l(line);
         string interface;
         l >> interface;
-        if (interface == DEFAULT_NETWORK_INTERFACE + ":") {
+        if (interface == args.network_interface + ":") {
           l >> network_received;
           for (int i = 0; i < 8; i++) {
             l >> network_sent;
@@ -264,6 +276,8 @@ int main(int argc, char* argv[]) {
          << " " << network_received
          << " " << network_sent
          << endl;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // Sleep until next sample time
+    std::this_thread::sleep_for(std::chrono::seconds(args.period));
   }
 }
