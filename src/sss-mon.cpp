@@ -6,12 +6,14 @@
 #include <fstream>
 #include <sstream>
 #include <getopt.h>
+#include <sys/statvfs.h>
 
 // Set sensible default values for network interface and sampling period
 const int DEFAULT_ITERATIONS = 0;
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
 const std::string DEFAULT_LOG_FILE = "";
 const int DEFAULT_PERIOD = 1;
+const std::string DEFAULT_STAT_PATH = ".";
 
 namespace {
   /// Internal data structure for command line arguments
@@ -20,6 +22,7 @@ namespace {
     std::string log_file = DEFAULT_LOG_FILE;
     std::string network_interface = DEFAULT_NETWORK_INTERFACE;
     int period = DEFAULT_PERIOD;
+    std::string stat_path = DEFAULT_STAT_PATH;
   };
 
   /// Internal data structure for statistical data sample
@@ -46,6 +49,9 @@ namespace {
     unsigned long long int memory_used = 0;
     unsigned long long int swap_total = 0;
     unsigned long long int swap_used = 0;
+    unsigned long long int disk_total = 0;
+    unsigned long long int disk_used = 0;
+    unsigned long long int disk_available = 0;
     unsigned long long int network_received = 0;
     unsigned long long int network_sent = 0;
   };
@@ -81,6 +87,10 @@ void print_usage(std::ostream& os = std::cerr) {
      << "  -p, --period PERIOD   Set sampling period (in seconds). Must be a\n"
      << "                        positive integer value (default: "
      << DEFAULT_PERIOD << ").\n"
+     << "  -s, --stat-file       Path to file/directory on the file system\n"
+     << "                        that should be used to gather disk usage\n"
+     << "                        statistics (default: " << DEFAULT_STAT_PATH
+     << ").\n"
      << "\n"
      << "For each sample, a space-separated list of the following fields is\n"
      << "written to stdout or a log file and terminated by a newline \n"
@@ -113,13 +123,18 @@ void print_usage(std::ostream& os = std::cerr) {
      << "  memory_used           Memory currently in use (in bytes).\n"
      << "  swap_total            Total amount of swap space (in bytes).\n"
      << "  swap_used             Swap space currently in use (in bytes).\n"
+     << "  disk_total            Total usable disk space (in bytes).\n"
+     << "  disk_used             Disk space currently in use (in bytes).\n"
+     << "  disk_available        Disk space available for non-privileged\n"
+     << "                        users (in bytes).\n"
      << "  network_received      Total bytes received (in bytes).\n"
      << "  network_sent          Total bytes sent (in bytes).\n"
      << "\n"
-     << "The recorded information is gathered from the 'proc' filesystem (see\n"
+     << "Most of the information is gathered from the 'proc' filesystem (see\n"
      << "also 'man proc'). CPU data is from '/proc/loadavg' and '/proc/stat',\n"
      << "memory data is from '/proc/meminfo', and network data is from\n"
-     << "'/proc/net/dev'.\n";
+     << "'/proc/net/dev'. Disk usage statistics are obtained through the\n"
+     << "system call 'statvfs()'.\n";
   os.flush();
 }
 
@@ -137,11 +152,13 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
       {"iterations", required_argument, nullptr, 'n'},
       {"network-interface", required_argument, nullptr, 'i'},
       {"period", required_argument, nullptr, 'p'},
+      {"stat-path", required_argument, nullptr, 's'},
       {nullptr, 0, nullptr, 0}
     };
 
     // Get next argument
-    const int c = getopt_long(argc, argv, "fhn:l:i:p:", long_options, nullptr);
+    const int c = getopt_long(
+        argc, argv, "fhn:l:i:p:s:", long_options, nullptr);
 
     // Exit loop if end of options is reached
     if (c == -1) {
@@ -230,6 +247,21 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
           break;
         }
 
+      // Set stat path
+      case 's':
+        {
+          args.stat_path = optarg;
+
+          // Make sure that the path exists and can be used
+          struct statvfs sb;
+          if (statvfs(args.stat_path.c_str(), &sb) != 0) {
+            std::cerr << "error: stat path (" << args.stat_path << ") does"
+                      << " not exit or cannot be used" << std::endl;
+            std::exit(2);
+          }
+          break;
+        }
+
       // If an unknown/bad argument was encountered, show usage and quit
       case '?':
         {
@@ -262,7 +294,8 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
 
 
 /// Gather data sample
-Sample sample(const std::string& network_interface) {
+Sample sample(const std::string& network_interface,
+              const std::string& stat_path) {
   // Create sample object
   Sample s{};
 
@@ -360,6 +393,15 @@ Sample sample(const std::string& network_interface) {
     s.swap_used *= 1024;
   }
 
+  // Disk usage
+  {
+    struct statvfs sb;
+    statvfs(stat_path.c_str(), &sb);
+    s.disk_total = sb.f_blocks * sb.f_frsize;
+    s.disk_used = (sb.f_blocks - sb.f_bfree) * sb.f_frsize;
+    s.disk_available = sb.f_bavail * sb.f_frsize;
+  }
+
   // Bytes received/sent on network interface
   {
     // Open file
@@ -413,7 +455,7 @@ int main(int argc, char* argv[]) {
   const auto sleep_time = std::chrono::microseconds(1000000 * args.period);
   for (unsigned long long int iteration = 0;;) {
     // Obtain sample
-    const Sample s = sample(args.network_interface);
+    const Sample s = sample(args.network_interface, args.stat_path);
 
     // Print all data to stdout
     os << s.date
@@ -435,6 +477,9 @@ int main(int argc, char* argv[]) {
        << " " << s.memory_used
        << " " << s.swap_total
        << " " << s.swap_used
+       << " " << s.disk_total
+       << " " << s.disk_used
+       << " " << s.disk_available
        << " " << s.network_received
        << " " << s.network_sent
        << std::endl;
