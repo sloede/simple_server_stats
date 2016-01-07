@@ -395,10 +395,17 @@ Sample sample(const std::string& network_interface,
 
   // Disk usage
   {
+    // Call statvfs to get information on file system
     struct statvfs sb;
     statvfs(stat_path.c_str(), &sb);
+
+    // All values of interest from statvfs are given in blocks, thus to obtain
+    // the byte value they have to be multiplied by frsize
+    // Total = disk capacity
     s.disk_total = sb.f_blocks * sb.f_frsize;
+    // Used = capacity minus what kernel/root may use
     s.disk_used = (sb.f_blocks - sb.f_bfree) * sb.f_frsize;
+    // Available = remaining capacity that normal users may use
     s.disk_available = sb.f_bavail * sb.f_frsize;
   }
 
