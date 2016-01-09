@@ -1,4 +1,6 @@
+#include <array>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -9,13 +11,16 @@
 #include <sys/statvfs.h>
 
 // Set sensible default values for network interface and sampling period
-const int DEFAULT_ITERATIONS = 0;
+constexpr const int DEFAULT_ITERATIONS = 0;
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
 const std::string DEFAULT_LOG_FILE = "";
-const int DEFAULT_PERIOD = 1;
+constexpr const int DEFAULT_PERIOD = 1;
 const std::string DEFAULT_STAT_PATH = ".";
 
 namespace {
+  /// Maximum file name length for time-encoded log files
+  constexpr const int max_log_file_name_length = 512;
+
   /// Internal data structure for command line arguments
   struct CommandLineArguments {
     unsigned long long int iterations = DEFAULT_ITERATIONS;
@@ -59,7 +64,7 @@ namespace {
 
 
 /// Print usage information
-void print_usage(std::ostream& os = std::cerr) {
+static void print_usage(std::ostream& os = std::cerr) {
   os << "usage: sss-mon [-f] [-h] [-i INTERFACE] [-p PERIOD] [LOGFILE]\n"
      << "\n"
      << "sss-mon gathers information on the current CPU load, memory usage, \n"
@@ -68,7 +73,14 @@ void print_usage(std::ostream& os = std::cerr) {
      << "of iterations is specified on the command line.\n"
      << "\n"
      << "positional arguments:\n"
-     << "  LOGFILE               Write data to LOGFILE instead of stdout.\n"
+     << "  LOGFILE               Write data to LOGFILE instead of stdout. The\n"
+     << "                        file name may contain time format strings as\n"
+     << "                        defined in std::strftime, and the actual\n"
+     << "                        name will be re-determined before each\n"
+     << "                        write. The overall file name length (after\n"
+     << "                        optional time formats have been applied)\n"
+     << "                        must be less than " << max_log_file_name_length
+     << ".\n"
      << "\n"
      << "optional arguments:\n"
      << "  -f, --field-names     Print space-separated list of field names\n"
@@ -140,7 +152,7 @@ void print_usage(std::ostream& os = std::cerr) {
 
 
 /// Parse command line options
-CommandLineArguments parse_arguments(int argc, char* argv[]) {
+static CommandLineArguments parse_arguments(int argc, char* argv[]) {
   CommandLineArguments args;
 
   // Parse option arguments
@@ -283,8 +295,13 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
   // Parse for optional log file
   if (optind < argc) {
     args.log_file = argv[optind];
-    if (args.log_file == "") {
+    if (args.log_file.empty()) {
       std::cerr << "error: log file name is empty" << std::endl;
+      exit(2);
+    }
+    if (args.log_file.length() > max_log_file_name_length) {
+      std::cerr << "error: log file name is too long (must be < "
+                << max_log_file_name_length << ")" << std::endl;
       exit(2);
     }
   }
@@ -294,8 +311,8 @@ CommandLineArguments parse_arguments(int argc, char* argv[]) {
 
 
 /// Gather data sample
-Sample sample(const std::string& network_interface,
-              const std::string& stat_path) {
+static Sample sample(const std::string& network_interface,
+                     const std::string& stat_path) {
   // Create sample object
   Sample s{};
 
@@ -439,28 +456,81 @@ Sample sample(const std::string& network_interface,
 }
 
 
+/// Parse string through std::strftime using the current system time
+static std::string time_formatted(const std::string& s) {
+  // Return early if string is empty
+  if (s.empty()) {
+    return std::string();
+  }
+
+  // Parse string through strftime
+  std::array<char, max_log_file_name_length + 1> buffer;
+  const auto now = std::time(nullptr);
+  const auto status = std::strftime(
+      &buffer[0], max_log_file_name_length + 1, s.c_str(),
+      std::localtime(&now));
+
+  // If there was an error, return empty string
+  if (status == 0) {
+    return std::string();
+  }
+
+  return std::string(&buffer[0]);
+}
+
+
 int main(int argc, char* argv[]) {
   // Parse command line arguments
   const auto args = parse_arguments(argc, argv);
 
-  // Open log file if specified
-  std::ofstream log_file;
-  if (args.log_file != "") {
-    log_file.open(args.log_file, std::ios::out | std::ios::app);
-    if (!log_file.good()) {
-      std::cerr << "error: could not open log file '" << args.log_file
-                << "' for writing" << std::endl;
-      std::exit(1);
-    }
-    std::cout << "Writing data to '" << args.log_file << "'..." << std::endl;
-  }
+  // Check if log file is specified and whether its name is time-encoded
+  const bool use_log_file = (!args.log_file.empty());
+  const bool has_time_in_log_file_name =
+      (time_formatted(args.log_file) != args.log_file);
 
   // Set output stream to use
-  std::ostream os(args.log_file == "" ? std::cout.rdbuf() : log_file.rdbuf());
+  std::ofstream log_file;
+  std::string log_file_name;
+  std::ostream os(use_log_file ? log_file.rdbuf() : std::cout.rdbuf());
 
   // Begin main loop
   const auto sleep_time = std::chrono::microseconds(1000000 * args.period);
   for (unsigned long long int iteration = 0;;) {
+    // Check if log file needs to be (re-)opened
+    if (use_log_file) {
+      // Determine name for next log file
+      const auto new_name =
+          has_time_in_log_file_name
+          ? time_formatted(args.log_file)
+          : args.log_file;
+
+      // An empty new name implies an error in the time_formatted function
+      if (new_name.empty()) {
+        std::cerr << "error: log file name after applying time format is too "
+                  << "long (must be < " << max_log_file_name_length << ")"
+                  << std::endl;
+        std::exit(1);
+      }
+
+      // Check if log file needs to be (re-)opened
+      if (new_name != log_file_name) {
+        // Close log file if it was already open
+        if (log_file.is_open()) {
+          log_file.close();
+          log_file.clear();
+        }
+
+        log_file_name = new_name;
+        log_file.open(log_file_name, std::ios::out | std::ios::app);
+        if (!log_file.good()) {
+          std::cerr << "error: could not open log file '" << log_file_name
+                    << "' for writing" << std::endl;
+          std::exit(1);
+        }
+        std::cout << "Writing to '" << log_file_name << "'..." << std::endl;
+      }
+    }
+
     // Obtain sample
     const Sample s = sample(args.network_interface, args.stat_path);
 
