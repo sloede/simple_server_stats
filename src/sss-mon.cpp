@@ -499,6 +499,9 @@ int main(int argc, char* argv[]) {
   // Begin main loop
   const auto sleep_time = std::chrono::microseconds(1000000 * args.period);
   for (unsigned long long int iteration = 0;;) {
+    // Obtain sample
+    const Sample s = sample(args.network_interface, args.stat_path);
+
     // Check if log file needs to be (re-)opened
     if (use_log_file) {
       // Determine name for next log file
@@ -533,9 +536,6 @@ int main(int argc, char* argv[]) {
         std::cout << "Writing to '" << log_file_name << "'..." << std::endl;
       }
     }
-
-    // Obtain sample
-    const Sample s = sample(args.network_interface, args.stat_path);
 
     // Print all data to stdout
     os << s.date
@@ -573,6 +573,8 @@ int main(int argc, char* argv[]) {
     }
 
     // Sleep until next sample time
-    std::this_thread::sleep_for(sleep_time);
+    const auto sleep_until = std::chrono::steady_clock::time_point(
+        std::chrono::microseconds(s.steady) + sleep_time);
+    std::this_thread::sleep_until(sleep_until);
   }
 }
