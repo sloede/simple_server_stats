@@ -201,6 +201,9 @@ static CommandLineArguments parse_arguments(int argc, char* argv[]) {
                     << " memory_used"
                     << " swap_total"
                     << " swap_used"
+                    << " disk_total"
+                    << " disk_used"
+                    << " disk_available"
                     << " network_received"
                     << " network_sent"
                     << std::endl;
