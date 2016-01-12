@@ -486,6 +486,19 @@ int main(int argc, char* argv[]) {
   // Parse command line arguments
   const auto args = parse_arguments(argc, argv);
 
+  // Check if system clock uses Unix epoch, otherwise quit with an error
+  {
+    const auto epoch = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::time_point());
+    std::array<char, 16> buffer;
+    const auto status =
+        std::strftime(&buffer[0], 16, "%Y%m%d%H%M%S", std::gmtime(&epoch));
+    if (status == 0 || std::string(&buffer[0]) != "19700101000000") {
+      std::cerr << "error: system clock does not use Unix epoch" << std::endl;
+      std::exit(1);
+    }
+  }
+
   // Check if log file is specified and whether its name is time-encoded
   const bool use_log_file = (!args.log_file.empty());
   const bool has_time_in_log_file_name =
