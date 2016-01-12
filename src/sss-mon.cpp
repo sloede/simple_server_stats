@@ -10,55 +10,62 @@
 #include <getopt.h>
 #include <sys/statvfs.h>
 
+// Define types for statistic data - use 64 bit values (signed) for maximum
+// range and ease-of-use
+using Int = long long int;
+using Float = double;
+
 // Set sensible default values for network interface and sampling period
-constexpr const int DEFAULT_ITERATIONS = 0;
+constexpr const Int DEFAULT_ITERATIONS = 0;
 const std::string DEFAULT_NETWORK_INTERFACE = "eth0";
 const std::string DEFAULT_LOG_FILE = "";
-constexpr const int DEFAULT_PERIOD = 1;
+constexpr const Int DEFAULT_PERIOD = 1;
 const std::string DEFAULT_STAT_PATH = ".";
 
 namespace {
   /// Maximum file name length for time-encoded log files
-  constexpr const int max_log_file_name_length = 512;
+  constexpr const Int max_log_file_name_length = 512;
 
   /// Internal data structure for command line arguments
   struct CommandLineArguments {
-    unsigned long long int iterations = DEFAULT_ITERATIONS;
+    Int iterations = DEFAULT_ITERATIONS;
     std::string log_file = DEFAULT_LOG_FILE;
     std::string network_interface = DEFAULT_NETWORK_INTERFACE;
-    int period = DEFAULT_PERIOD;
+    Int period = DEFAULT_PERIOD;
     std::string stat_path = DEFAULT_STAT_PATH;
   };
 
   /// Internal data structure for statistical data sample
   struct Sample {
     // Timestamp values may be signed
-    long long int date = 0;
-    long long int steady = 0;
+    Int date = 0;
+    Int steady = 0;
 
-    // All other values are defined as unsigned
-    double cpu_load_1m = 0.0;
-    double cpu_load_5m = 0.0;
-    double cpu_load_15m = 0.0;
-    unsigned long long int cpu_time_user = 0;
-    unsigned long long int cpu_time_nice = 0;
-    unsigned long long int cpu_time_system = 0;
-    unsigned long long int cpu_time_idle = 0;
-    unsigned long long int cpu_time_iowait = 0;
-    unsigned long long int cpu_time_irq = 0;
-    unsigned long long int cpu_time_softirq = 0;
-    unsigned long long int cpu_time_steal = 0;
-    unsigned long long int cpu_time_guest = 0;
-    unsigned long long int cpu_time_guest_nice = 0;
-    unsigned long long int memory_total = 0;
-    unsigned long long int memory_used = 0;
-    unsigned long long int swap_total = 0;
-    unsigned long long int swap_used = 0;
-    unsigned long long int disk_total = 0;
-    unsigned long long int disk_used = 0;
-    unsigned long long int disk_available = 0;
-    unsigned long long int network_received = 0;
-    unsigned long long int network_sent = 0;
+    // Load values may be decimal numbers
+    Float cpu_load_1m = 0.0;
+    Float cpu_load_5m = 0.0;
+    Float cpu_load_15m = 0.0;
+
+    // All other values are counters that cannot be negative
+    Int cpu_time_user = 0;
+    Int cpu_time_nice = 0;
+    Int cpu_time_system = 0;
+    Int cpu_time_idle = 0;
+    Int cpu_time_iowait = 0;
+    Int cpu_time_irq = 0;
+    Int cpu_time_softirq = 0;
+    Int cpu_time_steal = 0;
+    Int cpu_time_guest = 0;
+    Int cpu_time_guest_nice = 0;
+    Int memory_total = 0;
+    Int memory_used = 0;
+    Int swap_total = 0;
+    Int swap_used = 0;
+    Int disk_total = 0;
+    Int disk_used = 0;
+    Int disk_available = 0;
+    Int network_received = 0;
+    Int network_sent = 0;
   };
 }
 
@@ -107,10 +114,11 @@ static void print_usage(std::ostream& os = std::cerr) {
      << "For each sample, a space-separated list of the following fields is\n"
      << "written to stdout or a log file and terminated by a newline \n"
      << "character (\\n):\n"
-     << "  date                  Unix timestamp in milliseconds.\n"
-     << "  steady                A steady timestamp (not necessarily since\n"
-     << "                        Unix epoch) for robust time-average \n"
-     << "                        calculations in microseconds.\n"
+     << "  date                  Unix timestamp (in milliseconds).\n"
+     << "  time_delta            Time since last sample was recorded (in \n"
+     << "                        milliseconds). A value of zero indicates\n"
+     << "                        that this is the first sample since\n"
+     << "                        (re-)starting sss-mon.\n"
      << "  cpu_load_1m           CPU load average (1 minute average).\n"
      << "  cpu_load_5m           CPU load average (5 minute average).\n"
      << "  cpu_load_15m          CPU load average (15 minute average).\n"
@@ -169,7 +177,7 @@ static CommandLineArguments parse_arguments(int argc, char* argv[]) {
     };
 
     // Get next argument
-    const int c = getopt_long(
+    const auto c = getopt_long(
         argc, argv, "fhn:l:i:p:s:", long_options, nullptr);
 
     // Exit loop if end of options is reached
@@ -183,7 +191,7 @@ static CommandLineArguments parse_arguments(int argc, char* argv[]) {
       case 'f':
         {
           std::cout << "date"
-                    << " steady"
+                    << " time_delta"
                     << " cpu_load_1m"
                     << " cpu_load_5m"
                     << " cpu_load_15m"
@@ -324,7 +332,7 @@ static Sample sample(const std::string& network_interface,
       std::chrono::system_clock::now().time_since_epoch()).count();
 
   // Steady clock timestamp for robust time-average calculation
-  s.steady = std::chrono::duration_cast<std::chrono::microseconds>(
+  s.steady = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
 
   // CPU load averages
@@ -376,10 +384,10 @@ static Sample sample(const std::string& network_interface,
     std::ifstream in("/proc/meminfo");
 
     // Read file line by line and parse each line for relevant data
-    unsigned long long int memory_free = 0;
-    unsigned long long int buffers = 0;
-    unsigned long long int cached = 0;
-    unsigned long long int swap_free = 0;
+    Int memory_free = 0;
+    Int buffers = 0;
+    Int cached = 0;
+    Int swap_free = 0;
     for (std::string line; std::getline(in, line); ) {
       // Extract data type
       std::istringstream l(line);
@@ -447,7 +455,7 @@ static Sample sample(const std::string& network_interface,
         l >> s.network_received;
 
         // Bytes sent is the 10th value
-        for (int i = 0; i < 8; i++) {
+        for (Int i = 0; i < 8; i++) {
           l >> s.network_sent;
         }
         break;
@@ -510,8 +518,9 @@ int main(int argc, char* argv[]) {
   std::ostream os(use_log_file ? log_file.rdbuf() : std::cout.rdbuf());
 
   // Begin main loop
-  const auto sleep_time = std::chrono::microseconds(1000000 * args.period);
-  for (unsigned long long int iteration = 0;;) {
+  const auto sleep_time = std::chrono::seconds(args.period);
+  Int previous_steady = 0;
+  for (Int iteration = 0;;) {
     // Obtain sample
     const Sample s = sample(args.network_interface, args.stat_path);
 
@@ -550,9 +559,12 @@ int main(int argc, char* argv[]) {
       }
     }
 
+    // Calculate time delta since last sample
+    const Int time_delta = (iteration == 0) ? 0 : s.steady - previous_steady;
+
     // Print all data to stdout
     os << s.date
-       << " " << s.steady
+       << " " << time_delta
        << " " << s.cpu_load_1m
        << " " << s.cpu_load_5m
        << " " << s.cpu_load_15m
@@ -580,6 +592,9 @@ int main(int argc, char* argv[]) {
     // Increment interation counter
     iteration++;
 
+    // Store current value of steady clock for reference
+    previous_steady = s.steady;
+
     // Exit main loop if maximum number of iterations is reached
     if (args.iterations > 0 && iteration >= args.iterations) {
       break;
@@ -587,7 +602,7 @@ int main(int argc, char* argv[]) {
 
     // Sleep until next sample time
     const auto sleep_until = std::chrono::steady_clock::time_point(
-        std::chrono::microseconds(s.steady) + sleep_time);
+        std::chrono::milliseconds(s.steady) + sleep_time);
     std::this_thread::sleep_until(sleep_until);
   }
 }
