@@ -38,7 +38,7 @@ namespace {
   /// Internal data structure for statistical data sample
   struct Sample {
     // Timestamp values may be signed
-    Int date = 0;
+    Int timestamp = 0;
     Int steady = 0;
 
     // Load values may be decimal numbers
@@ -114,7 +114,7 @@ static void print_usage(std::ostream& os = std::cerr) {
      << "For each sample, a space-separated list of the following fields is\n"
      << "written to stdout or a log file and terminated by a newline \n"
      << "character (\\n):\n"
-     << "  date                  Unix timestamp (in milliseconds).\n"
+     << "  timestamp             Unix timestamp (in milliseconds).\n"
      << "  time_delta            Time since last sample was recorded (in \n"
      << "                        milliseconds). A value of zero indicates\n"
      << "                        that this is the first sample since\n"
@@ -190,7 +190,7 @@ static CommandLineArguments parse_arguments(int argc, char* argv[]) {
       // Print field names and quit
       case 'f':
         {
-          std::cout << "date"
+          std::cout << "timestamp"
                     << " time_delta"
                     << " cpu_load_1m"
                     << " cpu_load_5m"
@@ -328,7 +328,7 @@ static Sample sample(const std::string& network_interface,
   Sample s{};
 
   // Current point in time as reference
-  s.date = std::chrono::duration_cast<std::chrono::milliseconds>(
+  s.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()).count();
 
   // Steady clock timestamp for robust time-average calculation
@@ -563,7 +563,7 @@ int main(int argc, char* argv[]) {
     const Int time_delta = (iteration == 0) ? 0 : s.steady - previous_steady;
 
     // Print all data to stdout
-    os << s.date
+    os << s.timestamp
        << " " << time_delta
        << " " << s.cpu_load_1m
        << " " << s.cpu_load_5m
