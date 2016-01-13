@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+
+# Assumptions about record/log files
+# - each log file contains only lines with records (i.e. no headers etc.)
+# - each record is in its own line
+# - the first field of each line is the Unix timestamp in milliseconds
+# - excluding leap seconds, the ordering of records is strictly monotonically
+#   increasing by timestamp
+# - the second field of each line contains the time since the last sample was
+#   recorded (in milliseconds)
+# - if the second field contains a zero, it means that this is the first record
+#   after sss-mon was (re-)started
+# - log files do not overlap in time (i.e. the first record of any log file will
+#   never be from a point in time that is between the first and the last record
+#   of another log file)
+
+import argparse
+import fileinput
+import re
+import sys
+import time
+
+range_units = {
+        'h': 3600*1000,
+        'd': 24*3600*1000,
+        'y': 365*24*3600*1000
+}
+
+
+def parse_arguments():
+    p = argparse.ArgumentParser()
+    p.add_argument('log_file', nargs='+')
+    p.add_argument('--time-range', '-t', default='1h:1d:3d:30d')
+    p.add_argument('--data-file-prefix', '-p', default='sss_data_%Y%m%d_%H%M%S_')
+    p.add_argument('--num-samples', '-n', type=int, default=2048)
+    return p.parse_args()
+
+
+def range_to_timestamp(time_range, now):
+    # Convert range into timestamp
+    value, unit = re.match('^(\d+)(\D+)$', time_range).groups()
+    return now - int(value) * range_units[unit]
+
+
+def sort_by_timestamp(filenames):
+    timestamps = []
+    for filename in filenames:
+        with open(filename, 'r') as f:
+            timestamps.append(int(f.readline().split()[0]))
+    return [x for x in sorted(zip(timestamps, filenames))]
+
+
+def main():
+    # Parse command line arguments
+    args = parse_arguments()
+
+    # Get current time in milliseconds
+    now = int(time.time() * 1000)
+
+    # Get timestamps for the specified ranges
+    range_timestamps = [range_to_timestamp(r, now) for r in args.time_range.split(':')]
+
+    # Filter out log files that are not needed
+    sorted_log_files = sort_by_timestamp(args.log_file)
+    sorted_input_files = []
+    for i in range(len(sorted_log_files) - 1):
+        if sorted_log_files[i + 1][0] < min(range_timestamps):
+            continue
+        else:
+            sorted_input_files.append(sorted_log_files[i][1])
+    sorted_input_files.append(sorted_log_files[-1][1])
+
+    # Create data files
+    try:
+        # Open files
+        data_files = []
+        for r in args.time_range.split(':'):
+            filename = time.strftime(args.data_file_prefix + r, time.localtime(now//1000))
+            data_files.append((filename, open(filename, 'wt')))
+
+        # Read & process input files line by line (i.e. sample by sample)
+        previous = None
+        for line in fileinput.input(sorted_input_files):
+            # Seperate sample into fields
+            current = line.strip().split()
+
+            # If time_delta is zero, treat this sample as if there was no previous
+            if int(current[1]) == 0:
+                previous = None
+
+            # If there is no previous sample, just store the fields and continue
+            if previous is None:
+                previous = current
+                continue
+
+            # Otherwise create new data record
+            record = [None] * 17
+
+            # Save time since last sample (in seconds) for gradient calculations
+            time_delta = int(current[1]) / 1000
+
+            # Timestamp
+            record[0] = int(current[0])
+
+            # CPU load (1m, 5m, 15m)
+            record[1] = float(current[2])
+            record[2] = float(current[3])
+            record[3] = float(current[4])
+
+            # CPU utilization (user, system, nice, idle; all in time fraction)
+            # Source: http://stackoverflow.com/a/23376195/1329844 @ 20160113
+            cpu_user = int(current[5]) - int(current[13]) # user - guest
+            cpu_nice = int(current[6]) - int(current[14]) # nice - guest_nice
+            cpu_syst = int(current[7]) + int(current[10]) + int(current[11]) # system + irq + softirq
+            cpu_idle = int(current[8]) + int(current[9]) # idle + iowait
+            cpu_virt = int(current[13]) + int(current[14]) # guest + guest_nice
+            cpu_tota = cpu_user + cpu_nice + cpu_syst + cpu_idle + int(current[12]) + cpu_virt
+            cpu_user_prev = int(previous[5]) - int(previous[13])
+            cpu_nice_prev = int(previous[6]) - int(previous[14])
+            cpu_syst_prev = int(previous[7]) + int(previous[10]) + int(previous[11])
+            cpu_idle_prev = int(previous[8]) + int(previous[9])
+            cpu_virt_prev = int(previous[13]) + int(previous[14])
+            cpu_tota_prev = cpu_user_prev + cpu_nice_prev + cpu_syst_prev + cpu_idle_prev + int(previous[12]) + cpu_virt_prev
+            cpu_user_delta = cpu_user - cpu_user_prev
+            cpu_nice_delta = cpu_nice - cpu_nice_prev
+            cpu_syst_delta = cpu_syst - cpu_syst_prev
+            cpu_idle_delta = cpu_idle - cpu_idle_prev
+            cpu_virt_delta = cpu_virt - cpu_virt_prev
+            cpu_tota_delta = cpu_tota - cpu_tota_prev
+            record[4] = cpu_user_delta / cpu_tota_delta
+            record[5] = cpu_syst_delta / cpu_tota_delta
+            record[6] = cpu_nice_delta / cpu_tota_delta
+            record[7] = cpu_idle_delta / cpu_tota_delta
+
+            # Memory (total bytes, used bytes)
+            record[8] = int(current[15])
+            record[9] = int(current[16])
+
+            # Swap space (total bytes, used bytes)
+            record[10] = int(current[17])
+            record[11] = int(current[18])
+
+            # Disk space (total bytes, used bytes, available bytes)
+            record[12] = int(current[19])
+            record[13] = int(current[20])
+            record[14] = int(current[21])
+
+            # Network bandwith (in bytes/s)
+            record[15] = (int(current[22]) - int(previous[22])) / time_delta
+            record[16] = (int(current[23]) - int(previous[23])) / time_delta
+            print(record)
+            break
+    finally:
+        # Close files no matter what
+        for _, f in data_files:
+            f.close()
+
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
