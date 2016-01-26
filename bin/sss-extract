@@ -74,9 +74,13 @@ def main():
     try:
         # Open files
         data_files = []
-        for r in args.time_range.split(':'):
+        for r, timestamp in zip(args.time_range.split(':'), range_timestamps):
             filename = time.strftime(args.data_file_prefix + r, time.localtime(now//1000))
-            data_files.append((filename, open(filename, 'wt')))
+            data_files.append((filename, open(filename, 'wt'), timestamp))
+
+        # Write header
+        for _, f, _ in data_files:
+            f.write("# timestamp cpu_load_1m cpu_load_5m cpu_load_15m cpu_util_user cpu_util_system cpu_util_nice cpu_util_idle memory_total memory_used swap_total swap_used disk_total disk_used disk_available network_in network_out\n")
 
         # Read & process input files line by line (i.e. sample by sample)
         previous = None
@@ -132,27 +136,30 @@ def main():
             record[6] = cpu_nice_delta / cpu_tota_delta
             record[7] = cpu_idle_delta / cpu_tota_delta
 
-            # Memory (total bytes, used bytes)
-            record[8] = int(current[15])
-            record[9] = int(current[16])
+            # Memory (total mebibytes, used mebibytes)
+            record[8] = int(current[15]) // 1048576
+            record[9] = int(current[16]) // 1048576
 
-            # Swap space (total bytes, used bytes)
-            record[10] = int(current[17])
-            record[11] = int(current[18])
+            # Swap space (total mebibytes, used mebibytes)
+            record[10] = int(current[17]) // 1048576
+            record[11] = int(current[18]) // 1048576
 
-            # Disk space (total bytes, used bytes, available bytes)
-            record[12] = int(current[19])
-            record[13] = int(current[20])
-            record[14] = int(current[21])
+            # Disk space (total mebibytes, used mebibytes, available mebibytes)
+            record[12] = int(current[19]) // 1048576
+            record[13] = int(current[20]) // 1048576
+            record[14] = int(current[21]) // 1048576
 
             # Network bandwith (in bytes/s)
             record[15] = (int(current[22]) - int(previous[22])) / time_delta
             record[16] = (int(current[23]) - int(previous[23])) / time_delta
-            print(record)
-            break
+
+            # Write record to file
+            for _, f, timestamp in data_files:
+                if record[0] >= timestamp:
+                    f.write("{:d} {:1.3f} {:1.3f} {:1.3f} {:1.3f} {:1.3f} {:1.3f} {:1.3f} {:d} {:d} {:d} {:d} {:d} {:d} {:d} {:1.3f} {:1.3f}\n".format(*record))
     finally:
         # Close files no matter what
-        for _, f in data_files:
+        for _, f, _ in data_files:
             f.close()
 
 
